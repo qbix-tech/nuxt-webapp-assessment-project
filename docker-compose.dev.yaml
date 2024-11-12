@@ -1,0 +1,59 @@
+version: "3"
+
+services:
+  turso:
+    image: ghcr.io/tursodatabase/libsql-server
+    environment:
+      - SQLD_NODE=primary
+      - SQLD_HTTP_AUTH=${TURSO_DB_TOKEN:-basic:ZGV2OnBhc3N3b3Jk}
+    ports:
+      - "28000:8080"
+      - "28001:5001"
+    restart: always
+    volumes:
+      - .dockerVolume/libsql:/var/lib/sqld
+
+  s3:
+    image: minio/minio
+    environment:
+      - MINIO_ROOT_USER=${S3_PRIVATE_ACCESS_KEY_ID:-${S3_PUBLIC_ACCESS_KEY_ID}}
+      - MINIO_ROOT_PASSWORD=${S3_PRIVATE_SECRET_ACCESS_KEY:-${S3_PUBLIC_SECRET_ACCESS_KEY}}
+    ports:
+      - "28020:9000"
+      - "28021:9001"
+    entrypoint: sh
+    command: -c 'minio server /data --console-address ":9001"'
+    restart: always
+    volumes:
+      - .dockerVolume/s3:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://s3:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  s3-entrypoint:
+    image: minio/mc
+    depends_on:
+      s3:
+        condition: service_healthy
+    entrypoint: /bin/sh -c "
+      /usr/bin/mc config host add minio http://s3:9000 ${S3_PRIVATE_ACCESS_KEY_ID:-${S3_PUBLIC_ACCESS_KEY_ID}} ${S3_PRIVATE_SECRET_ACCESS_KEY:-${S3_PUBLIC_SECRET_ACCESS_KEY}};
+      /usr/bin/mc mb minio/private;
+      /usr/bin/mc mb minio/public;
+      /usr/bin/mc policy set download minio/public;
+      /usr/bin/mc anonymous set download minio/public;
+      exit 0;"
+
+  smtp4dev:
+    image: rnwood/smtp4dev:v3
+    environment:
+      - ServerOptions__Urls=http://*:80
+      - ServerOptions__HostName=smtp4dev
+    ports:
+      - "28010:25"
+      - "28011:80"
+      - "28012:143"
+    restart: always
+    volumes:
+      - .dockerVolume/smtp4dev:/smtp4dev
